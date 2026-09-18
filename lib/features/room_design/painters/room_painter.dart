@@ -146,7 +146,7 @@ class RoomPainter extends CustomPainter {
   }) {
     if (opacity <= 0) return;
     final paint = Paint()
-      ..color = AppTheme.surface.withAlpha(_alphaFor(opacity))
+      ..color = AppTheme.roomFloor.withAlpha(_alphaFor(opacity))
       ..style = PaintingStyle.fill;
     canvas.drawRect(Rect.fromLTWH(0, 0, roomW, roomH), paint);
   }
@@ -189,7 +189,7 @@ class RoomPainter extends CustomPainter {
       ..strokeWidth = 0.5;
 
     final majorPaint = Paint()
-      ..color = AppTheme.gridLine.withAlpha(120)
+      ..color = AppTheme.gridLineMajor
       ..strokeWidth = 1.0;
 
     if (drawProgress < 1.0) {
@@ -240,10 +240,10 @@ class RoomPainter extends CustomPainter {
     double roomW,
     double roomH,
   ) {
-    final textStyle = TextStyle(
-      color: AppTheme.textSecondary.withAlpha(150),
-      fontSize: 9,
-      fontFamily: 'monospace',
+    const textStyle = TextStyle(
+      color: AppTheme.textTertiary,
+      fontSize: 10,
+      fontFeatures: [FontFeature.tabularFigures()],
     );
 
     for (var i = 1; i <= roomWidthM.floor(); i++) {
@@ -262,12 +262,12 @@ class RoomPainter extends CustomPainter {
     final rSpeakerPos = roomState.rightSpeaker.position;
 
     final measurementPaint = Paint()
-      ..color = AppTheme.highlight.withAlpha(100)
+      ..color = AppTheme.textTertiary.withAlpha(170)
       ..strokeWidth = 1.0
       ..style = PaintingStyle.stroke;
 
     final dashPaint = Paint()
-      ..color = AppTheme.highlight.withAlpha(80)
+      ..color = AppTheme.textTertiary.withAlpha(120)
       ..strokeWidth = 1.0
       ..style = PaintingStyle.stroke;
 
@@ -402,16 +402,17 @@ class RoomPainter extends CustomPainter {
       layout.text,
       layout.position,
       layout.style,
-      background: AppTheme.background.withAlpha(200),
+      background: AppTheme.roomFloor.withAlpha(215),
     );
   }
 
   TextStyle _measurementLabelTextStyle() {
-    return TextStyle(
-      color: AppTheme.highlight.withAlpha(220),
-      fontSize: 9,
-      fontWeight: FontWeight.w600,
-      fontFamily: 'monospace',
+    return const TextStyle(
+      color: AppTheme.textSecondary,
+      fontSize: 10,
+      fontWeight: FontWeight.w500,
+      letterSpacing: -0.1,
+      fontFeatures: [FontFeature.tabularFigures()],
     );
   }
 
@@ -566,17 +567,71 @@ class RoomPainter extends CustomPainter {
         color: color.withAlpha(200),
         fontSize: 10,
         fontWeight: FontWeight.w600,
-        fontFamily: 'monospace',
+        fontFeatures: const [FontFeature.tabularFigures()],
       ),
-      background: AppTheme.background.withAlpha(180),
+      background: AppTheme.roomFloor.withAlpha(205),
     );
   }
 
   void _drawReflectionPoints(Canvas canvas) {
-    // Draw aiming ray for each speaker
+    // Where each speaker points.
     _drawSpeakerAimingRay(canvas, roomState.leftSpeaker, AppTheme.leftSpeaker);
     _drawSpeakerAimingRay(
         canvas, roomState.rightSpeaker, AppTheme.rightSpeaker);
+
+    // The first bounce off each wall: speaker → wall → ear. These are the
+    // spots worth treating, so the plan has to show where they land.
+    for (final point in reflectionPoints) {
+      _drawReflectionPath(canvas, point);
+    }
+  }
+
+  void _drawReflectionPath(Canvas canvas, ReflectionPoint point) {
+    // Weak paths fade out rather than being hidden, so the picture stays
+    // honest about which reflections actually matter.
+    final weight = point.strength.clamp(0.0, 1.0);
+    if (weight < 0.08) return;
+
+    final speakerPt = Offset(
+      point.speakerPosition.x * scale,
+      point.speakerPosition.y * scale,
+    );
+    final wallPt = Offset(
+      point.position.x * scale,
+      point.position.y * scale,
+    );
+    final earPt = Offset(
+      point.listenerPosition.x * scale,
+      point.listenerPosition.y * scale,
+    );
+
+    final rayPaint = Paint()
+      ..color = AppTheme.reflectionRay.withAlpha((40 + 150 * weight).round())
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    _drawDashedLine(canvas, speakerPt, wallPt, rayPaint);
+    _drawDashedLine(canvas, wallPt, earPt, rayPaint);
+
+    // An open ring marks the point on the wall; the stronger the reflection,
+    // the more solid it reads.
+    final radius = 3.0 + 2.5 * weight;
+    canvas.drawCircle(
+      wallPt,
+      radius,
+      Paint()
+        ..color = AppTheme.canvasField.withAlpha(210)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawCircle(
+      wallPt,
+      radius,
+      Paint()
+        ..color =
+            AppTheme.reflectionPoint.withAlpha((90 + 165 * weight).round())
+        ..strokeWidth = 1.4
+        ..style = PaintingStyle.stroke,
+    );
   }
 
   void _drawSpeakerAimingRay(Canvas canvas, Speaker speaker, Color color) {
@@ -602,8 +657,8 @@ class RoomPainter extends CustomPainter {
 
     // Draw smooth ray line
     final rayPaint = Paint()
-      ..color = color.withAlpha(180)
-      ..strokeWidth = 2.0
+      ..color = color.withAlpha(70)
+      ..strokeWidth = 1.0
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke
       ..isAntiAlias = true;
@@ -611,9 +666,9 @@ class RoomPainter extends CustomPainter {
     canvas.drawLine(speakerPt, rayEndPt, rayPaint);
 
     // Draw direction indicator at ray end
-    const arrowSize = 6.0;
+    const arrowSize = 5.0;
     final arrowPaint = Paint()
-      ..color = color.withAlpha(200)
+      ..color = color.withAlpha(110)
       ..style = PaintingStyle.fill
       ..isAntiAlias = true;
 
@@ -630,7 +685,7 @@ class RoomPainter extends CustomPainter {
       rayEndPt.dy - forward.$2 * arrowSize + perpY * arrowSize * 0.5,
     );
 
-    canvas.drawCircle(rayEndPt, 3.0, arrowPaint);
+    canvas.drawCircle(rayEndPt, 2.0, arrowPaint);
     canvas.drawLine(arrowPoint1, rayEndPt, rayPaint);
     canvas.drawLine(arrowPoint2, rayEndPt, rayPaint);
   }
@@ -759,25 +814,27 @@ class RoomPainter extends CustomPainter {
     _drawText(
       canvas,
       speaker.label,
-      Offset(offset.dx - 5, offset.dy - 7),
+      Offset(offset.dx - 4, offset.dy - 7),
       TextStyle(
-        color: Colors.white.withAlpha((255 * fade).round()),
+        color: AppTheme.canvasField.withAlpha((255 * fade).round()),
         fontSize: 12,
-        fontWeight: FontWeight.w800,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
       ),
     );
 
-    // Position and toe-in label below speaker
-    final posLabel =
-        '(${pos.x.toStringAsFixed(1)}, ${pos.y.toStringAsFixed(1)}) • ${speaker.toeInDegrees.toStringAsFixed(0)}°';
+    // Toe-in below the speaker. The coordinates were already readable from
+    // the measurement rules, so the angle is all this needs to add.
+    final posLabel = '${speaker.toeInDegrees.toStringAsFixed(0)}°';
     _drawText(
       canvas,
       posLabel,
-      Offset(offset.dx - 28, offset.dy + 16),
+      Offset(offset.dx - 9, offset.dy + 14),
       TextStyle(
-        color: color.withAlpha((180 * fade).round()),
-        fontSize: 9,
-        fontFamily: 'monospace',
+        color: AppTheme.textSecondary.withAlpha((235 * fade).round()),
+        fontSize: 10,
+        fontWeight: FontWeight.w500,
+        fontFeatures: const [FontFeature.tabularFigures()],
       ),
     );
 
@@ -828,7 +885,7 @@ class RoomPainter extends CustomPainter {
         color: color.withAlpha((255 * fade).round()),
         fontSize: 9,
         fontWeight: FontWeight.w700,
-        fontFamily: 'monospace',
+        fontFeatures: const [FontFeature.tabularFigures()],
       ),
     );
 
@@ -912,12 +969,12 @@ class RoomPainter extends CustomPainter {
       'Aim',
       Offset(offset.dx - 10, offset.dy + 12),
       TextStyle(
-        color: color.withAlpha((220 * fade).round()),
-        fontSize: 9,
-        fontWeight: FontWeight.w700,
-        fontFamily: 'monospace',
+        color: color.withAlpha((235 * fade).round()),
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.1,
       ),
-      background: AppTheme.background.withAlpha((200 * fade).round()),
+      background: AppTheme.roomFloor.withAlpha((215 * fade).round()),
     );
   }
 
@@ -925,14 +982,14 @@ class RoomPainter extends CustomPainter {
     if (roomState.blockerZones.isEmpty) return;
 
     final fillPaint = Paint()
-      ..color = AppTheme.sweetSpotRed.withAlpha(50)
+      ..color = AppTheme.blockerFill
       ..style = PaintingStyle.fill;
     final borderPaint = Paint()
-      ..color = AppTheme.sweetSpotRed.withAlpha(150)
+      ..color = AppTheme.blockerBorder
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
     final hatchPaint = Paint()
-      ..color = AppTheme.sweetSpotRed.withAlpha(70)
+      ..color = AppTheme.blockerBorder.withAlpha(110)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8;
 
@@ -980,9 +1037,9 @@ class RoomPainter extends CustomPainter {
             color: AppTheme.accent,
             fontSize: 10,
             fontWeight: FontWeight.w700,
-            fontFamily: 'monospace',
+            fontFeatures: [FontFeature.tabularFigures()],
           ),
-          background: AppTheme.background.withAlpha(190),
+          background: AppTheme.roomFloor.withAlpha(210),
         );
       }
     }

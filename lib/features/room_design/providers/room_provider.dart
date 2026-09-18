@@ -158,6 +158,25 @@ class RoomNotifier extends Notifier<RoomState> {
     state = state.copyWith(blockerZones: const []);
   }
 
+  /// Adopt a placement the optimizer worked out, so the advice the app gives
+  /// can be acted on rather than only read.
+  void applyOptimizedPlacement(RoomState optimized) {
+    state = state.copyWith(
+      leftSpeaker: state.leftSpeaker.copyWith(
+        position: optimized.leftSpeaker.position,
+        toeInDegrees: optimized.leftSpeaker.toeInDegrees,
+      ),
+      rightSpeaker: state.rightSpeaker.copyWith(
+        position: optimized.rightSpeaker.position,
+        toeInDegrees: optimized.rightSpeaker.toeInDegrees,
+      ),
+      listeningPosition: state.listeningPosition.copyWith(
+        position: optimized.listeningPosition.position,
+      ),
+    );
+    _ensureEntitiesOutsideBlockers();
+  }
+
   void resetToDefaults() {
     _nextBlockerId = 1;
     state = _buildDefaultState();

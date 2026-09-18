@@ -301,8 +301,8 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
-  static const _logoAnimationDuration = Duration(milliseconds: 2400);
-  static const _holdDuration = Duration(milliseconds: 800);
+  static const _logoAnimationDuration = Duration(milliseconds: 1150);
+  static const _holdDuration = Duration(milliseconds: 220);
 
   late AnimationController _fadeController;
   late Animation<double> _fadeOut;
@@ -312,7 +312,7 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
 
     _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 360),
       vsync: this,
     );
 
@@ -359,32 +359,29 @@ class _SplashScreenState extends State<SplashScreen>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   AnimatedSweetspotLogo(
-                    size: 140,
+                    size: 120,
                     fadeProgress: 1.0 - _fadeOut.value,
                   ),
-                  const SizedBox(height: 48),
-                  Column(
-                    children: [
-                      const Text(
-                        'Sweetspot',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 36,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Audio Room Optimizer',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary.withAlpha(200),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w400,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 36),
+                  const Text(
+                    'Sweetspot',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 32,
+                      fontWeight: FontWeight.w600,
+                      // Large text reads too loose at default tracking.
+                      letterSpacing: -0.9,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Speaker placement for real rooms',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: -0.1,
+                    ),
                   ),
                 ],
               ),

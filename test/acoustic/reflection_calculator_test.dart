@@ -129,7 +129,11 @@ void main() {
       expect(reflections.length, greaterThan(2));
     });
 
-    test('toe-in updates dispersion rays', () {
+    // A first-reflection point is fixed by geometry: mirror the speaker
+    // through the wall and aim at the listener. Rotating the speaker on the
+    // spot cannot move that point — it changes how much energy travels down
+    // that path, which is exactly why toeing in tames side-wall reflections.
+    test('toe-in changes reflection strength, not its position', () {
       const leftZero = Speaker(
         channel: SpeakerChannel.left,
         position: RoomPosition(1.5, 1.5),
@@ -163,16 +167,37 @@ void main() {
       expect(steered, isNotEmpty);
       expect(base.length, equals(steered.length));
 
-      bool anyDifferent = false;
-      for (var i = 0; i < base.length && i < steered.length; i++) {
-        if ((base[i].position.x - steered[i].position.x).abs() > 0.001 ||
-            (base[i].position.y - steered[i].position.y).abs() > 0.001) {
-          anyDifferent = true;
-          break;
+      for (var i = 0; i < base.length; i++) {
+        expect(
+          base[i].position.x,
+          closeTo(steered[i].position.x, 0.001),
+          reason: 'reflection geometry does not depend on toe-in',
+        );
+        expect(base[i].position.y, closeTo(steered[i].position.y, 0.001));
+        expect(base[i].wall, equals(steered[i].wall));
+      }
+
+      final changed = <int>[];
+      for (var i = 0; i < base.length; i++) {
+        if ((base[i].strength - steered[i].strength).abs() > 0.001) {
+          changed.add(i);
         }
       }
-      expect(anyDifferent, isTrue,
-          reason: 'Toe-in should change reflection positions');
+      expect(changed, isNotEmpty,
+          reason: 'toeing the speakers in must change how hard they hit the walls');
+
+      // Toeing in points the speakers away from the side walls, so the side
+      // reflections should weaken rather than strengthen.
+      final baseSide = base
+          .where((r) =>
+              r.wall == ReflectionWall.left || r.wall == ReflectionWall.right)
+          .fold<double>(0, (sum, r) => sum + r.strength);
+      final steeredSide = steered
+          .where((r) =>
+              r.wall == ReflectionWall.left || r.wall == ReflectionWall.right)
+          .fold<double>(0, (sum, r) => sum + r.strength);
+      expect(steeredSide, lessThan(baseSide),
+          reason: 'toe-in should reduce side-wall energy');
     });
   });
 

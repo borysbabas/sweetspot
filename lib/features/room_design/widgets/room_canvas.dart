@@ -1,10 +1,10 @@
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/animated_border_reveal.dart';
 import '../models/editable_distance_target.dart';
 import '../models/room_position.dart';
 import '../models/room_state.dart';
@@ -21,6 +21,15 @@ class RoomCanvas extends ConsumerStatefulWidget {
 class _RoomCanvasState extends ConsumerState<RoomCanvas>
     with SingleTickerProviderStateMixin {
   _DragTarget? _activeDrag;
+
+  /// Where inside the marker it was grabbed, so it doesn't jump to the cursor.
+  Offset _grabOffset = Offset.zero;
+
+  /// Needed to turn a global pointer position into canvas coordinates before
+  /// the gesture is claimed.
+  final GlobalKey _planKey = GlobalKey();
+  bool _hoveringMarker = false;
+
   bool _showGrid = true;
   bool _showReflections = true;
   bool _showTriangle = true;
@@ -88,12 +97,7 @@ class _RoomCanvasState extends ConsumerState<RoomCanvas>
 
         return Column(
           children: [
-            AnimatedReveal(
-              delay: const Duration(milliseconds: 120),
-              duration: const Duration(milliseconds: 500),
-              slideUp: true,
-              child: _buildToolbar(),
-            ),
+            _buildToolbar(),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -124,15 +128,24 @@ class _RoomCanvasState extends ConsumerState<RoomCanvas>
                   );
 
                   return Container(
-                    color: AppTheme.background,
+                    color: AppTheme.canvasField,
                     child: InteractiveViewer(
                       constrained: false,
                       minScale: 0.5,
                       maxScale: 5.0,
+                      // Without slack the view is pinned at 1x and panning does
+                      // nothing, which made every drag feel dead.
+                      boundaryMargin: const EdgeInsets.all(240),
                       child: Padding(
                         padding: const EdgeInsets.all(padding),
                         child: Center(
                           child: MouseRegion(
+                            // Say what is draggable before it is grabbed.
+                            cursor: _drawBlockersMode
+                                ? SystemMouseCursors.precise
+                                : _hoveringMarker
+                                    ? SystemMouseCursors.grab
+                                    : MouseCursor.defer,
                             onHover: (event) => _onCanvasHover(
                               event.localPosition,
                               roomState,
@@ -144,74 +157,79 @@ class _RoomCanvasState extends ConsumerState<RoomCanvas>
                                     .read(hoveredBlockerIdProvider.notifier)
                                     .state = null;
                               }
+                              if (_hoveringMarker) {
+                                setState(() => _hoveringMarker = false);
+                              }
                             },
-                            child: GestureDetector(
-                              onTapUp: (details) =>
-                                  _onTapUp(details, roomState, roomPainter),
-                              onPanStart: (details) {
-                                if (_drawBlockersMode) {
-                                  _onBlockerPanStart(
-                                    details,
-                                    roomState,
-                                    canvasWidth,
-                                    canvasHeight,
-                                  );
-                                  return;
-                                }
-                                _onPanStart(
-                                  details,
-                                  roomState,
-                                  canvasWidth,
-                                  canvasHeight,
-                                );
+                            child: RawGestureDetector(
+                              gestures: {
+                                _MarkerDragRecognizer:
+                                    GestureRecognizerFactoryWithHandlers<
+                                        _MarkerDragRecognizer>(
+                                  () => _MarkerDragRecognizer(),
+                                  (recognizer) {
+                                    recognizer.shouldClaim = (globalPosition) {
+                                      return _shouldClaimDrag(
+                                        globalPosition,
+                                        roomState,
+                                        canvasWidth,
+                                      );
+                                    };
+                                    recognizer.onStart = (details) {
+                                      _handleDragStart(
+                                        details,
+                                        roomState,
+                                        canvasWidth,
+                                        canvasHeight,
+                                      );
+                                    };
+                                    recognizer.onUpdate = (details) {
+                                      _handleDragUpdate(
+                                        details,
+                                        roomState,
+                                        canvasWidth,
+                                        canvasHeight,
+                                      );
+                                    };
+                                    recognizer.onEnd = (_) {
+                                      _handleDragEnd(
+                                        roomState,
+                                        canvasWidth,
+                                        canvasHeight,
+                                      );
+                                    };
+                                  },
+                                ),
                               },
-                              onPanUpdate: (details) {
-                                if (_drawBlockersMode) {
-                                  _onBlockerPanUpdate(
-                                    details,
-                                    roomState,
-                                    canvasWidth,
-                                    canvasHeight,
-                                  );
-                                  return;
-                                }
-                                _onPanUpdate(
-                                    details, canvasWidth, canvasHeight);
-                              },
-                              onPanEnd: (_) {
-                                if (_drawBlockersMode) {
-                                  _onBlockerPanEnd(
-                                      roomState, canvasWidth, canvasHeight);
-                                  return;
-                                }
-                                _onPanEnd();
-                              },
-                              child: SizedBox(
-                                width: canvasWidth,
-                                height: canvasHeight,
-                                child: Stack(
-                                  children: [
-                                    Positioned.fill(
-                                        child:
-                                            CustomPaint(painter: roomPainter)),
-                                    if (_blockerPreviewRect != null)
-                                      Positioned.fromRect(
-                                        rect: _blockerPreviewRect!,
-                                        child: IgnorePointer(
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              color: AppTheme.sweetSpotRed
-                                                  .withAlpha(45),
-                                              border: Border.all(
-                                                color: AppTheme.sweetSpotRed
-                                                    .withAlpha(170),
-                                                width: 1,
+                              child: GestureDetector(
+                                onTapUp: (details) =>
+                                    _onTapUp(details, roomState, roomPainter),
+                                child: SizedBox(
+                                  key: _planKey,
+                                  width: canvasWidth,
+                                  height: canvasHeight,
+                                  child: Stack(
+                                    children: [
+                                      Positioned.fill(
+                                        child: CustomPaint(painter: roomPainter),
+                                      ),
+                                      if (_blockerPreviewRect != null)
+                                        Positioned.fromRect(
+                                          rect: _blockerPreviewRect!,
+                                          child: IgnorePointer(
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.blockerFill,
+                                                border: Border.all(
+                                                  color: AppTheme.accent,
+                                                  width: 1,
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -229,116 +247,138 @@ class _RoomCanvasState extends ConsumerState<RoomCanvas>
     );
   }
 
-  Rect? get _blockerPreviewRect {
-    if (_activeBlockerDragId != null) return null;
-    if (_blockerStartPx == null || _blockerCurrentPx == null) return null;
-    return Rect.fromPoints(_blockerStartPx!, _blockerCurrentPx!);
+  /// Turns a global pointer position into coordinates on the plan.
+  Offset _toPlanLocal(Offset globalPosition) {
+    final box = _planKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return globalPosition;
+    return box.globalToLocal(globalPosition);
   }
 
-  Widget _buildToolbar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        border: Border(bottom: BorderSide(color: AppTheme.border, width: 0.5)),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            _ToolbarToggle(
-              icon: Icons.grid_4x4_rounded,
-              label: 'Grid',
-              active: _showGrid,
-              onTap: () => setState(() => _showGrid = !_showGrid),
-              animationDelay: const Duration(milliseconds: 150),
-            ),
-            const SizedBox(width: 4),
-            _ToolbarToggle(
-              icon: Icons.change_history_rounded,
-              label: 'Triangle',
-              active: _showTriangle,
-              onTap: () => setState(() => _showTriangle = !_showTriangle),
-              animationDelay: const Duration(milliseconds: 220),
-            ),
-            const SizedBox(width: 4),
-            _ToolbarToggle(
-              icon: Icons.spoke_rounded,
-              label: 'Rays',
-              active: _showReflections,
-              onTap: () => setState(() => _showReflections = !_showReflections),
-              animationDelay: const Duration(milliseconds: 290),
-            ),
-            const SizedBox(width: 4),
-            _ToolbarToggle(
-              icon: Icons.straighten_rounded,
-              label: 'Measures',
-              active: _showMeasurements,
-              onTap: () =>
-                  setState(() => _showMeasurements = !_showMeasurements),
-              animationDelay: const Duration(milliseconds: 360),
-            ),
-            const SizedBox(width: 4),
-            _ToolbarToggle(
-              icon: Icons.block_rounded,
-              label: 'Blockers',
-              active: _drawBlockersMode,
-              onTap: () => setState(() {
-                _drawBlockersMode = !_drawBlockersMode;
-                if (!_drawBlockersMode) {
-                  _blockerStartPx = null;
-                  _blockerCurrentPx = null;
-                }
-              }),
-              animationDelay: const Duration(milliseconds: 430),
-            ),
-          ],
-        ),
-      ),
-    );
+  /// Only take the gesture when there is something under the pointer to move.
+  /// Anything else is left to InteractiveViewer so the plan can still be
+  /// panned and zoomed.
+  bool _shouldClaimDrag(
+    Offset globalPosition,
+    RoomState roomState,
+    double canvasWidth,
+  ) {
+    if (_drawBlockersMode) return true;
+    return _markerAt(_toPlanLocal(globalPosition), roomState, canvasWidth) !=
+        null;
   }
 
-  void _onPanStart(
+  /// The draggable marker under a point on the plan, if any.
+  _DragTarget? _markerAt(
+    Offset localPosition,
+    RoomState roomState,
+    double canvasWidth,
+  ) {
+    final scale = canvasWidth / roomState.room.widthMeters;
+
+    final candidates = <_DragTarget, Offset>{
+      _DragTarget.leftSpeaker: Offset(
+        roomState.leftSpeaker.position.x * scale,
+        roomState.leftSpeaker.position.y * scale,
+      ),
+      _DragTarget.rightSpeaker: Offset(
+        roomState.rightSpeaker.position.x * scale,
+        roomState.rightSpeaker.position.y * scale,
+      ),
+      _DragTarget.listeningPosition: Offset(
+        roomState.listeningPosition.position.x * scale,
+        roomState.listeningPosition.position.y * scale,
+      ),
+    };
+
+    _DragTarget? best;
+    var bestDistance = double.infinity;
+    for (final entry in candidates.entries) {
+      final distance = _distancePx(localPosition, entry.value);
+      if (distance <= _hitRadius && distance < bestDistance) {
+        best = entry.key;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  void _handleDragStart(
     DragStartDetails details,
     RoomState roomState,
     double canvasWidth,
     double canvasHeight,
   ) {
-    final localPos = details.localPosition;
-    final scale = canvasWidth / roomState.room.widthMeters;
+    final local = _toPlanLocal(details.globalPosition);
 
-    final lPos = roomState.leftSpeaker.position;
-    final rPos = roomState.rightSpeaker.position;
-    final lpPos = roomState.listeningPosition.position;
-
-    final lOffset = Offset(lPos.x * scale, lPos.y * scale);
-    final rOffset = Offset(rPos.x * scale, rPos.y * scale);
-    final lpOffset = Offset(lpPos.x * scale, lpPos.y * scale);
-
-    if (_distancePx(localPos, lOffset) <= _hitRadius) {
-      _activeDrag = _DragTarget.leftSpeaker;
-    } else if (_distancePx(localPos, rOffset) <= _hitRadius) {
-      _activeDrag = _DragTarget.rightSpeaker;
-    } else if (_distancePx(localPos, lpOffset) <= _hitRadius) {
-      _activeDrag = _DragTarget.listeningPosition;
+    if (_drawBlockersMode) {
+      _onBlockerPanStart(
+        DragStartDetails(
+          localPosition: local,
+          globalPosition: details.globalPosition,
+        ),
+        roomState,
+        canvasWidth,
+        canvasHeight,
+      );
+      return;
     }
+
+    final target = _markerAt(local, roomState, canvasWidth);
+    if (target == null) return;
+
+    final scale = canvasWidth / roomState.room.widthMeters;
+    final centre = switch (target) {
+      _DragTarget.leftSpeaker => Offset(
+          roomState.leftSpeaker.position.x * scale,
+          roomState.leftSpeaker.position.y * scale,
+        ),
+      _DragTarget.rightSpeaker => Offset(
+          roomState.rightSpeaker.position.x * scale,
+          roomState.rightSpeaker.position.y * scale,
+        ),
+      _DragTarget.listeningPosition => Offset(
+          roomState.listeningPosition.position.x * scale,
+          roomState.listeningPosition.position.y * scale,
+        ),
+    };
+
+    setState(() {
+      _activeDrag = target;
+      // Keep hold of where inside the marker it was grabbed, so it travels
+      // with the pointer instead of snapping its centre under the cursor.
+      _grabOffset = centre - local;
+    });
   }
 
-  void _onPanUpdate(
+  void _handleDragUpdate(
     DragUpdateDetails details,
+    RoomState roomState,
     double canvasWidth,
     double canvasHeight,
   ) {
+    final local = _toPlanLocal(details.globalPosition);
+
+    if (_drawBlockersMode) {
+      _onBlockerPanUpdate(
+        DragUpdateDetails(
+          localPosition: local,
+          globalPosition: details.globalPosition,
+          delta: details.delta,
+        ),
+        roomState,
+        canvasWidth,
+        canvasHeight,
+      );
+      return;
+    }
+
     if (_activeDrag == null) return;
 
-    final roomState = ref.read(roomProvider);
     final scale = canvasWidth / roomState.room.widthMeters;
-
-    final localPos = details.localPosition;
-    final roomPos = RoomPosition(localPos.dx / scale, localPos.dy / scale);
+    final adjusted = _clampToCanvas(local + _grabOffset, canvasWidth, canvasHeight);
+    final roomPos = RoomPosition(adjusted.dx / scale, adjusted.dy / scale);
 
     final notifier = ref.read(roomProvider.notifier);
-
     switch (_activeDrag!) {
       case _DragTarget.leftSpeaker:
         notifier.updateLeftSpeakerPosition(roomPos);
@@ -352,8 +392,98 @@ class _RoomCanvasState extends ConsumerState<RoomCanvas>
     }
   }
 
-  void _onPanEnd() {
-    _activeDrag = null;
+  void _handleDragEnd(
+    RoomState roomState,
+    double canvasWidth,
+    double canvasHeight,
+  ) {
+    if (_drawBlockersMode) {
+      _onBlockerPanEnd(roomState, canvasWidth, canvasHeight);
+      return;
+    }
+    if (_activeDrag != null) {
+      setState(() {
+        _activeDrag = null;
+        _grabOffset = Offset.zero;
+      });
+    }
+  }
+
+  Rect? get _blockerPreviewRect {
+    if (_activeBlockerDragId != null) return null;
+    if (_blockerStartPx == null || _blockerCurrentPx == null) return null;
+    return Rect.fromPoints(_blockerStartPx!, _blockerCurrentPx!);
+  }
+
+  Widget _buildToolbar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(bottom: BorderSide(color: AppTheme.borderSoft, width: 1)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // What the plan shows, grouped as one control because these
+            // options belong to the same question.
+            Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              ),
+              child: Row(
+                children: [
+                  _ToolbarToggle(
+                    icon: Icons.grid_4x4_rounded,
+                    label: 'Grid',
+                    active: _showGrid,
+                    onTap: () => setState(() => _showGrid = !_showGrid),
+                  ),
+                  _ToolbarToggle(
+                    icon: Icons.change_history_rounded,
+                    label: 'Triangle',
+                    active: _showTriangle,
+                    onTap: () => setState(() => _showTriangle = !_showTriangle),
+                  ),
+                  _ToolbarToggle(
+                    icon: Icons.spoke_rounded,
+                    label: 'Reflections',
+                    active: _showReflections,
+                    onTap: () =>
+                        setState(() => _showReflections = !_showReflections),
+                  ),
+                  _ToolbarToggle(
+                    icon: Icons.straighten_rounded,
+                    label: 'Measurements',
+                    active: _showMeasurements,
+                    onTap: () =>
+                        setState(() => _showMeasurements = !_showMeasurements),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            // Drawing obstacles is a mode, not a view option, so it sits
+            // apart from the group above.
+            _ModeButton(
+              icon: Icons.crop_free_rounded,
+              label: 'Blockers',
+              active: _drawBlockersMode,
+              onTap: () => setState(() {
+                _drawBlockersMode = !_drawBlockersMode;
+                if (!_drawBlockersMode) {
+                  _blockerStartPx = null;
+                  _blockerCurrentPx = null;
+                }
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _onTapUp(
@@ -593,6 +723,12 @@ class _RoomCanvasState extends ConsumerState<RoomCanvas>
     if (ref.read(hoveredBlockerIdProvider) != id) {
       ref.read(hoveredBlockerIdProvider.notifier).state = id;
     }
+
+    final overMarker =
+        _markerAt(localPosition, roomState, canvasWidth) != null;
+    if (overMarker != _hoveringMarker) {
+      setState(() => _hoveringMarker = overMarker);
+    }
   }
 
   int? _blockerIdAt(Offset localPosition, RoomState roomState, double scale) {
@@ -621,30 +757,27 @@ class _ToolbarToggle extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
-  final Duration animationDelay;
 
   const _ToolbarToggle({
     required this.icon,
     required this.label,
     required this.active,
     required this.onTap,
-    this.animationDelay = Duration.zero,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedReveal(
-      delay: animationDelay,
-      duration: const Duration(milliseconds: 300),
-      slideUp: true,
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
+          duration: AppTheme.motionFast,
+          curve: AppTheme.easeStandard,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: active ? AppTheme.accent.withAlpha(25) : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
+            color: active ? AppTheme.border : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSmall - 2),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -652,15 +785,16 @@ class _ToolbarToggle extends StatelessWidget {
               Icon(
                 icon,
                 size: 13,
-                color: active ? AppTheme.accent : AppTheme.textSecondary,
+                color: active ? AppTheme.textPrimary : AppTheme.textSecondary,
               ),
-              const SizedBox(width: 5),
+              const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
-                  color: active ? AppTheme.accent : AppTheme.textSecondary,
-                  fontSize: 11,
-                  fontWeight: active ? FontWeight.w500 : FontWeight.w400,
+                  color: active ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                  letterSpacing: -0.05,
                 ),
               ),
             ],
@@ -668,5 +802,83 @@ class _ToolbarToggle extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// A mode you switch on, so it takes the interactive colour when active.
+class _ModeButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _ModeButton({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: AppTheme.motionFast,
+          curve: AppTheme.easeStandard,
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            color: active ? AppTheme.accent : AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 13,
+                color: active ? Colors.white : AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: active ? Colors.white : AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: -0.05,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A pan that only enters the gesture arena when the pointer actually starts
+/// on something draggable.
+///
+/// The plan lives inside an [InteractiveViewer], whose scale recognizer wins
+/// against an ordinary pan. Staying out of the arena unless there is a marker
+/// under the pointer lets both work: grab a marker and you move it, drag
+/// anywhere else and the view pans.
+class _MarkerDragRecognizer extends PanGestureRecognizer {
+  /// Whether a pointer going down here should begin a drag.
+  bool Function(Offset globalPosition)? shouldClaim;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    if (shouldClaim?.call(event.position) != true) {
+      // Not ours — never join the arena, so InteractiveViewer takes it.
+      return;
+    }
+    super.addAllowedPointer(event);
+    // Claim it straight away, otherwise the enclosing scale recognizer wins
+    // the moment the pointer moves.
+    resolve(GestureDisposition.accepted);
   }
 }

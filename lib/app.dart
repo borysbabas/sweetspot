@@ -20,7 +20,7 @@ class _SweetspotAppState extends State<SweetspotApp> {
       title: 'Sweetspot',
       theme: AppTheme.dark(),
       home: AnimatedSwitcher(
-        duration: AppTheme.motionMedium,
+        duration: AppTheme.motionSlow,
         switchInCurve: AppTheme.easeStandard,
         switchOutCurve: Curves.easeIn,
         transitionBuilder: (child, animation) {

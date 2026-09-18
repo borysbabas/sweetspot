@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/animated_border_reveal.dart';
-import '../../acoustic/models/optimization_result.dart';
 import '../../acoustic/models/sweet_spot_result.dart';
 import '../models/room.dart';
 import '../models/room_state.dart';
 import '../providers/room_provider.dart';
 
+/// The inspector: everything you can set, grouped the way you think about it
+/// — the room first, then where the speakers point, then what the geometry
+/// works out to, then what is in the way.
+///
+/// Measurements are the content here, so they sit in a right-hand column
+/// with tabular figures and line up down the panel.
 class RoomSetupPanel extends ConsumerStatefulWidget {
   const RoomSetupPanel({super.key});
 
@@ -21,11 +26,6 @@ class _RoomSetupPanelState extends ConsumerState<RoomSetupPanel> {
   final _lengthController = TextEditingController();
   bool _initialized = false;
   Room? _lastSeenRoom;
-
-  bool _expandRoom = true;
-  bool _expandBlockers = true;
-  bool _expandAnalysis = true;
-  bool _expandToeIn = false;
 
   @override
   void dispose() {
@@ -44,7 +44,6 @@ class _RoomSetupPanelState extends ConsumerState<RoomSetupPanel> {
   Widget build(BuildContext context) {
     final roomState = ref.watch(roomProvider);
     final sweetSpot = ref.watch(sweetSpotResultProvider);
-    final optimization = ref.watch(optimizationResultProvider);
     final room = roomState.room;
 
     if (!_initialized) {
@@ -62,763 +61,560 @@ class _RoomSetupPanelState extends ConsumerState<RoomSetupPanel> {
 
     return Container(
       color: AppTheme.surface,
-      child: Column(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
         children: [
-          AnimatedReveal(
-            delay: const Duration(milliseconds: 160),
-            duration: const Duration(milliseconds: 450),
-            slideUp: true,
-            child: _buildHeader(sweetSpot, room),
-          ),
-          const Divider(height: 0.5, thickness: 0.5, color: AppTheme.border),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              children: [
-                _buildSection(
-                  title: 'Room',
-                  icon: Icons.crop_square_rounded,
-                  expanded: _expandRoom,
-                  onToggle: () => setState(() => _expandRoom = !_expandRoom),
-                  child: _buildDimensionFields(room),
-                  sectionIndex: 0,
-                ),
-                const SizedBox(height: 8),
-                _buildSection(
-                  title: 'Blockers',
-                  icon: Icons.block_rounded,
-                  expanded: _expandBlockers,
-                  onToggle: () =>
-                      setState(() => _expandBlockers = !_expandBlockers),
-                  child: _buildBlockersPanel(roomState),
-                  sectionIndex: 1,
-                ),
-                const SizedBox(height: 8),
-                _buildSection(
-                  title: 'Analysis',
-                  icon: Icons.bar_chart_rounded,
-                  expanded: _expandAnalysis,
-                  onToggle: () =>
-                      setState(() => _expandAnalysis = !_expandAnalysis),
-                  child:
-                      _buildSweetSpotPanel(sweetSpot, roomState, optimization),
-                  sectionIndex: 2,
-                ),
-                const SizedBox(height: 8),
-                _buildSection(
-                  title: 'Tuning',
-                  icon: Icons.tune_rounded,
-                  expanded: _expandToeIn,
-                  onToggle: () => setState(() => _expandToeIn = !_expandToeIn),
-                  child: _buildSpeakerToeIn(roomState),
-                  sectionIndex: 3,
-                ),
-                const SizedBox(height: 12),
-                AnimatedReveal(
-                  delay: const Duration(milliseconds: 700),
-                  duration: const Duration(milliseconds: 400),
-                  slideUp: true,
-                  child: _buildActions(),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+          _Score(result: sweetSpot),
+          const SizedBox(height: 24),
 
-  Widget _buildHeader(SweetSpotResult result, Room room) {
-    final accuracyPercent = (result.triangleAccuracy * 100).toInt();
-    final accuracyColor = result.isOptimal
-        ? AppTheme.sweetSpotGreen
-        : result.triangleAccuracy >= 0.6
-            ? AppTheme.sweetSpotYellow
-            : AppTheme.sweetSpotRed;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${room.widthMeters.toStringAsFixed(1)} × ${room.lengthMeters.toStringAsFixed(1)} m',
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Area ${room.area.toStringAsFixed(1)} m²',
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Quality badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: accuracyColor.withAlpha(18),
-              borderRadius: BorderRadius.circular(7),
-              border:
-                  Border.all(color: accuracyColor.withAlpha(80), width: 0.5),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  '$accuracyPercent%',
-                  style: TextStyle(
-                    color: accuracyColor,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                Text(
-                  'Quality',
-                  style: TextStyle(
-                    color: accuracyColor.withAlpha(180),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSection({
-    required String title,
-    required IconData icon,
-    required bool expanded,
-    required VoidCallback onToggle,
-    required Widget child,
-    required int sectionIndex,
-  }) {
-    final sectionDelay = Duration(milliseconds: 200 + (sectionIndex * 150));
-    final contentDelay = Duration(milliseconds: 250 + (sectionIndex * 150));
-
-    return AnimatedReveal(
-      delay: sectionDelay,
-      duration: const Duration(milliseconds: 600),
-      slideUp: true,
-      child: AnimatedBorderReveal(
-        delay: Duration.zero,
-        duration: const Duration(milliseconds: 700),
-        borderColor: AppTheme.accent.withAlpha(120),
-        borderWidth: 1.5,
-        borderRadius: BorderRadius.circular(9),
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceVariant,
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: AppTheme.border, width: 0.5),
-          ),
-          child: Column(
+          _Group(
+            title: 'Room',
             children: [
-              InkWell(
-                onTap: onToggle,
-                borderRadius: BorderRadius.vertical(
-                  top: const Radius.circular(9),
-                  bottom: expanded ? Radius.zero : const Radius.circular(9),
-                ),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      Icon(icon, size: 15, color: AppTheme.textSecondary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: const TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      Icon(
-                        expanded
-                            ? Icons.keyboard_arrow_up_rounded
-                            : Icons.keyboard_arrow_down_rounded,
-                        size: 16,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ],
+              Row(
+                children: [
+                  Expanded(
+                    child: _DimensionField(
+                      label: 'Width',
+                      controller: _widthController,
+                      onSubmitted: (value) => _applyDimension(room, width: value),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DimensionField(
+                      label: 'Length',
+                      controller: _lengthController,
+                      onSubmitted: (value) => _applyDimension(room, length: value),
+                    ),
+                  ),
+                ],
               ),
-              if (expanded) ...[
-                const Divider(
-                    height: 0.5, thickness: 0.5, color: AppTheme.border),
-                AnimatedReveal(
-                  delay: contentDelay,
-                  duration: const Duration(milliseconds: 500),
-                  slideUp: true,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: child,
-                  ),
-                ),
-              ],
+              const SizedBox(height: 10),
+              _Reading(label: 'Floor area', value: '${room.area.toStringAsFixed(1)} m²'),
             ],
           ),
-        ),
-      ),
-    );
-  }
 
-  Widget _buildDimensionFields(Room room) {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _buildTextField(
-                controller: _widthController,
-                label: 'Width (m)',
-                onChanged: (_) => _applyRoomDimensions(room),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildTextField(
-                controller: _lengthController,
-                label: 'Length (m)',
-                onChanged: (_) => _applyRoomDimensions(room),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required void Function(String) onChanged,
-  }) {
-    return TextField(
-      controller: controller,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      style: const TextStyle(
-        color: AppTheme.textPrimary,
-        fontSize: 13,
-      ),
-      decoration: InputDecoration(labelText: label),
-      onChanged: onChanged,
-    );
-  }
-
-  void _applyRoomDimensions(Room currentRoom) {
-    final width = double.tryParse(_widthController.text);
-    final length = double.tryParse(_lengthController.text);
-    if (width != null && width > 0 && length != null && length > 0) {
-      ref.read(roomProvider.notifier).updateRoom(
-            currentRoom.copyWith(
-              widthMeters: width.clamp(1.0, 30.0),
-              lengthMeters: length.clamp(1.0, 30.0),
-            ),
-          );
-    }
-  }
-
-  Widget _buildSweetSpotPanel(
-    SweetSpotResult result,
-    RoomState roomState,
-    OptimizationResult optimization,
-  ) {
-    final accuracyPercent = (result.triangleAccuracy * 100).toInt();
-    final accuracyColor = result.isOptimal
-        ? AppTheme.sweetSpotGreen
-        : result.triangleAccuracy >= 0.6
-            ? AppTheme.sweetSpotYellow
-            : AppTheme.sweetSpotRed;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildQualityBar(accuracyPercent, accuracyColor),
-        const SizedBox(height: 10),
-        _buildInfoRow('Triangle accuracy', '$accuracyPercent%',
-            valueColor: accuracyColor),
-        _buildInfoRow(
-            'Speaker spacing', '${result.speakerSpacing.toStringAsFixed(2)} m'),
-        _buildInfoRow(
-            'L distance', '${result.leftDistance.toStringAsFixed(2)} m',
-            valueColor: AppTheme.leftSpeaker),
-        _buildInfoRow(
-            'R distance', '${result.rightDistance.toStringAsFixed(2)} m',
-            valueColor: AppTheme.rightSpeaker),
-        _buildInfoRow('Listening distance',
-            '${result.listeningDistance.toStringAsFixed(2)} m'),
-        const SizedBox(height: 8),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: accuracyColor.withAlpha(12),
-            borderRadius: BorderRadius.circular(7),
-            border: Border.all(color: accuracyColor.withAlpha(50), width: 0.5),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          _Group(
+            title: 'Geometry',
             children: [
-              Icon(
-                result.isOptimal
-                    ? Icons.check_circle_outline_rounded
-                    : Icons.info_outline_rounded,
-                size: 13,
-                color: accuracyColor,
+              _Reading(
+                label: 'Speaker spacing',
+                value: '${sweetSpot.speakerSpacing.toStringAsFixed(2)} m',
               ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  result.feedback,
-                  style: TextStyle(
-                      color: accuracyColor, fontSize: 11, height: 1.45),
-                ),
+              _Reading(
+                label: 'Listening distance',
+                value: '${sweetSpot.listeningDistance.toStringAsFixed(2)} m',
+              ),
+              _Reading(
+                label: 'Left to ear',
+                value: '${sweetSpot.leftDistance.toStringAsFixed(2)} m',
+              ),
+              _Reading(
+                label: 'Right to ear',
+                value: '${sweetSpot.rightDistance.toStringAsFixed(2)} m',
+              ),
+              _Reading(
+                label: 'Symmetry',
+                value: '${(sweetSpot.symmetryRatio * 100).toStringAsFixed(0)}%',
+                // Asymmetry pulls the stereo image off centre, so it is worth
+                // flagging on its own rather than only inside the score.
+                valueColor: sweetSpot.symmetryRatio >= 0.98
+                    ? AppTheme.textPrimary
+                    : AppTheme.warning,
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 10),
-        _buildOptimizationSummary(optimization),
-      ],
-    );
-  }
 
-  Widget _buildOptimizationSummary(OptimizationResult optimization) {
-    final currentPercent =
-        (optimization.currentScore.triangleAccuracy * 100).toStringAsFixed(0);
-    final optimizedPercent =
-        (optimization.optimizedScore.triangleAccuracy * 100).toStringAsFixed(0);
+          _ToeInGroup(roomState: roomState),
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppTheme.primary,
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: AppTheme.border, width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Optimizer guidance',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+          _BlockerGroup(roomState: roomState),
+
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () => ref.read(roomProvider.notifier).resetToDefaults(),
+              child: const Text('Reset room'),
             ),
           ),
-          const SizedBox(height: 6),
-          _buildInfoRow('Current score', '$currentPercent%'),
-          _buildInfoRow('Optimized score', '$optimizedPercent%',
-              valueColor: AppTheme.accent),
-          const SizedBox(height: 6),
-          if (!optimization.hasMeaningfulImprovement)
-            const Text(
-              'Current setup is already close to optimal for this room and blocker map.',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 11,
-                height: 1.4,
-              ),
-            )
-          else if (optimization.instructions.isEmpty)
-            const Text(
-              'A better score was found, but suggested changes are below the practical threshold.',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 11,
-                height: 1.4,
-              ),
-            )
-          else
-            ...optimization.instructions.map(
-              (instruction) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 2),
-                      child: Icon(
-                        Icons.arrow_right_rounded,
-                        size: 14,
-                        color: AppTheme.accent,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        instruction.text,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 11,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
         ],
       ),
     );
   }
 
-  Widget _buildBlockersPanel(RoomState roomState) {
-    final blockers = roomState.blockerZones;
-    final hoveredId = ref.watch(hoveredBlockerIdProvider);
+  void _applyDimension(Room room, {String? width, String? length}) {
+    final parsedWidth = double.tryParse((width ?? '').replaceAll(',', '.'));
+    final parsedLength = double.tryParse((length ?? '').replaceAll(',', '.'));
+
+    final next = room.copyWith(
+      widthMeters: parsedWidth?.clamp(1.5, 20.0),
+      lengthMeters: parsedLength?.clamp(1.5, 20.0),
+    );
+    ref.read(roomProvider.notifier).updateRoom(next);
+    _syncControllersFromRoom(next);
+  }
+}
+
+// ── Score ────────────────────────────────────────────────────────────────
+
+/// The headline number, with the sentence that explains it. Both take the
+/// same colour ramp as the plan, so nothing in the app contradicts itself.
+class _Score extends StatelessWidget {
+  final SweetSpotResult result;
+
+  const _Score({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = (result.triangleAccuracy * 100).round();
+    final color = AppTheme.quality(result.triangleAccuracy);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Use the map toolbar and drag in Blockers mode to add unavailable areas.',
+          'Placement quality',
           style: TextStyle(
             color: AppTheme.textSecondary,
-            fontSize: 11,
-            height: 1.4,
+            fontSize: 13,
+            letterSpacing: -0.05,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: percent.toDouble()),
+              duration: AppTheme.motionMedium,
+              curve: AppTheme.easeStandard,
+              builder: (context, value, _) => Text(
+                value.round().toString(),
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 38,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -1.2,
+                  height: 1,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+            const SizedBox(width: 3),
+            const Text(
+              '/100',
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: 15),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: result.triangleAccuracy.clamp(0.0, 1.0)),
+            duration: AppTheme.motionMedium,
+            curve: AppTheme.easeStandard,
+            builder: (context, value, _) => LinearProgressIndicator(
+              value: value,
+              minHeight: 5,
+              backgroundColor: AppTheme.surfaceVariant,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
           ),
         ),
         const SizedBox(height: 10),
-        if (blockers.isEmpty)
-          const Text(
-            'No blocked zones yet.',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-          )
-        else
-          ...blockers.map(
-            (zone) {
-              final isHovered = zone.id == hoveredId;
-              return MouseRegion(
-                onEnter: (_) =>
-                    ref.read(hoveredBlockerIdProvider.notifier).state = zone.id,
-                onExit: (_) {
-                  if (ref.read(hoveredBlockerIdProvider) == zone.id) {
-                    ref.read(hoveredBlockerIdProvider.notifier).state = null;
-                  }
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: isHovered
-                        ? AppTheme.accent.withAlpha(18)
-                        : AppTheme.surface,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: isHovered ? AppTheme.accent : AppTheme.border,
-                      width: isHovered ? 0.9 : 0.5,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'B${zone.id}  x:${zone.x.toStringAsFixed(2)}  y:${zone.y.toStringAsFixed(2)}  '
-                          'w:${zone.width.toStringAsFixed(2)}  h:${zone.height.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            color: isHovered
-                                ? AppTheme.accent
-                                : AppTheme.textPrimary,
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                            fontWeight:
-                                isHovered ? FontWeight.w700 : FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded, size: 14),
-                        color: AppTheme.textSecondary,
-                        tooltip: 'Remove blocker',
-                        onPressed: () => ref
-                            .read(roomProvider.notifier)
-                            .removeBlockedZone(zone.id),
-                        padding: EdgeInsets.zero,
-                        constraints:
-                            const BoxConstraints(minHeight: 24, minWidth: 24),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        if (blockers.isNotEmpty)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () =>
-                  ref.read(roomProvider.notifier).clearBlockedZones(),
-              icon: const Icon(Icons.delete_outline_rounded, size: 14),
-              label: const Text('Clear all'),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildQualityBar(int percent, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Setup quality',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
-            Text(
-              '$percent%',
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 5),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(2),
-          child: LinearProgressIndicator(
-            value: percent / 100,
-            backgroundColor: AppTheme.primary,
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-            minHeight: 3,
+        Text(
+          result.feedback,
+          style: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 13,
+            height: 1.45,
+            letterSpacing: -0.05,
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildSpeakerToeIn(RoomState roomState) {
-    final recommendedLeftToeIn = ref.watch(recommendedLeftToeInProvider);
-    final recommendedRightToeIn = ref.watch(recommendedRightToeInProvider);
-    final aimingPoint = ref.watch(recommendedAimingPointProvider);
+// ── Building blocks ──────────────────────────────────────────────────────
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Aiming point info
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          decoration: BoxDecoration(
-            color: AppTheme.primary,
-            borderRadius: BorderRadius.circular(7),
-            border: Border.all(color: AppTheme.border, width: 0.5),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+class _Group extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+  final Widget? trailing;
+
+  const _Group({required this.title, required this.children, this.trailing});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // The sidebar is resizable, so the header has to survive being
+          // narrowed rather than overflow at the minimum width.
+          Row(
             children: [
-              const Text(
-                'Recommended aiming point',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'W: ${aimingPoint.x.toStringAsFixed(2)} m  ·  D: ${aimingPoint.y.toStringAsFixed(2)} m',
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        _buildToeInSlider(
-          label: 'Left',
-          currentToeIn: roomState.leftSpeaker.toeInDegrees,
-          recommendedToeIn: recommendedLeftToeIn,
-          onChanged: (v) =>
-              ref.read(roomProvider.notifier).updateLeftSpeakerToeIn(v),
-          color: AppTheme.leftSpeaker,
-        ),
-        const SizedBox(height: 14),
-        _buildToeInSlider(
-          label: 'Right',
-          currentToeIn: roomState.rightSpeaker.toeInDegrees,
-          recommendedToeIn: recommendedRightToeIn,
-          onChanged: (v) =>
-              ref.read(roomProvider.notifier).updateRightSpeakerToeIn(v),
-          color: AppTheme.rightSpeaker,
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.tonal(
-            onPressed: () {
-              ref
-                  .read(roomProvider.notifier)
-                  .updateLeftSpeakerToeIn(recommendedLeftToeIn);
-              ref
-                  .read(roomProvider.notifier)
-                  .updateRightSpeakerToeIn(recommendedRightToeIn);
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.accent.withAlpha(20),
-              foregroundColor: AppTheme.accent,
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-              textStyle:
-                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-            ),
-            child: const Text('Apply recommended toe-in'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildToeInSlider({
-    required String label,
-    required double currentToeIn,
-    required double recommendedToeIn,
-    required void Function(double) onChanged,
-    required Color color,
-  }) {
-    final isNear = (currentToeIn - recommendedToeIn).abs() < 1.0;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration:
-                      BoxDecoration(color: color, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 7),
-                Text(
-                  '$label speaker',
+              Expanded(
+                child: Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppTheme.textPrimary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                Text(
-                  '${currentToeIn.toStringAsFixed(1)}°',
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 12,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    fontFamily: 'monospace',
+                    letterSpacing: -0.1,
                   ),
                 ),
-                if (isNear) ...[
-                  const SizedBox(width: 4),
-                  const Icon(Icons.check_circle_rounded,
-                      size: 11, color: AppTheme.sweetSpotGreen),
-                ],
-              ],
+              ),
+              if (trailing != null)
+                Flexible(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: trailing!,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: children,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Label left, figure right, tabular so a column of them aligns.
+class _Reading extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  const _Reading({required this.label, required this.value, this.valueColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+                letterSpacing: -0.05,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor ?? AppTheme.textPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DimensionField extends StatefulWidget {
+  final String label;
+  final TextEditingController controller;
+  final ValueChanged<String> onSubmitted;
+
+  const _DimensionField({
+    required this.label,
+    required this.controller,
+    required this.onSubmitted,
+  });
+
+  @override
+  State<_DimensionField> createState() => _DimensionFieldState();
+}
+
+class _DimensionFieldState extends State<_DimensionField> {
+  final _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    // Commit when the field loses focus, so clicking away keeps what was
+    // typed. Tying this to focus rather than to any tap elsewhere matters:
+    // an unfocused field must not re-apply itself every time the canvas is
+    // dragged.
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) {
+        widget.onSubmitted(widget.controller.text);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.label,
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+        ),
+        const SizedBox(height: 5),
+        TextField(
+          controller: widget.controller,
+          focusNode: _focusNode,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+          ],
+          style: const TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 13,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+          decoration: const InputDecoration(
+            suffixText: 'm',
+            suffixStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+            isDense: true,
+          ),
+          onSubmitted: (value) {
+            widget.onSubmitted(value);
+            _focusNode.unfocus();
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// ── Toe-in ───────────────────────────────────────────────────────────────
+
+class _ToeInGroup extends ConsumerWidget {
+  final RoomState roomState;
+
+  const _ToeInGroup({required this.roomState});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recommendedLeft = ref.watch(recommendedLeftToeInProvider);
+    final recommendedRight = ref.watch(recommendedRightToeInProvider);
+    final notifier = ref.read(roomProvider.notifier);
+
+    final matchesRecommendation =
+        (roomState.leftSpeaker.toeInDegrees - recommendedLeft).abs() < 0.5 &&
+            (roomState.rightSpeaker.toeInDegrees - recommendedRight).abs() < 0.5;
+
+    return _Group(
+      title: 'Toe-in',
+      trailing: matchesRecommendation
+          ? const Text(
+              'Recommended',
+              style: TextStyle(color: AppTheme.success, fontSize: 12),
+            )
+          : TextButton(
+              onPressed: () {
+                notifier.updateLeftSpeakerToeIn(recommendedLeft);
+                notifier.updateRightSpeakerToeIn(recommendedRight);
+              },
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Recommend'),
+            ),
+      children: [
+        _ToeInSlider(
+          channel: 'Left',
+          value: roomState.leftSpeaker.toeInDegrees,
+          recommended: recommendedLeft,
+          onChanged: notifier.updateLeftSpeakerToeIn,
+        ),
+        const SizedBox(height: 6),
+        _ToeInSlider(
+          channel: 'Right',
+          value: roomState.rightSpeaker.toeInDegrees,
+          recommended: recommendedRight,
+          onChanged: notifier.updateRightSpeakerToeIn,
+        ),
+      ],
+    );
+  }
+}
+
+class _ToeInSlider extends StatelessWidget {
+  final String channel;
+  final double value;
+  final double recommended;
+  final ValueChanged<double> onChanged;
+
+  const _ToeInSlider({
+    required this.channel,
+    required this.value,
+    required this.recommended,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                channel,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  letterSpacing: -0.05,
+                ),
+              ),
+            ),
+            Text(
+              '${value.toStringAsFixed(0)}°',
+              style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'rec ${recommended.toStringAsFixed(0)}°',
+              style: const TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: 12,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ],
-        ),
-        const SizedBox(height: 2),
-        Text(
-          'Recommended  ${recommendedToeIn.toStringAsFixed(1)}°',
-          style: const TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 10,
-              fontFamily: 'monospace'),
         ),
         SliderTheme(
           data: SliderTheme.of(context).copyWith(
-            activeTrackColor: color,
-            thumbColor: Colors.white,
-            inactiveTrackColor: AppTheme.primary,
-            overlayColor: color.withAlpha(30),
-            trackHeight: 2.5,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
+            trackHeight: 3,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
           ),
           child: Slider(
-            value: currentToeIn.clamp(0.0, 45.0),
-            min: 0.0,
-            max: 45.0,
-            divisions: 90,
+            value: value.clamp(0.0, 45.0),
+            min: 0,
+            max: 45,
             onChanged: onChanged,
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildInfoRow(String label, String value, {Color? valueColor}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Flexible(
-              child: Text(label,
-                  style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 11))),
-          const SizedBox(width: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor ?? AppTheme.textPrimary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              fontFamily: 'monospace',
+// ── Blockers ─────────────────────────────────────────────────────────────
+
+class _BlockerGroup extends ConsumerWidget {
+  final RoomState roomState;
+
+  const _BlockerGroup({required this.roomState});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final zones = roomState.blockerZones;
+    final notifier = ref.read(roomProvider.notifier);
+
+    return _Group(
+      title: 'Obstacles',
+      trailing: zones.isEmpty
+          ? null
+          : TextButton(
+              onPressed: notifier.clearBlockedZones,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Clear all'),
+            ),
+      children: [
+        if (zones.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 2),
+            child: Text(
+              'Turn on Blockers in the view bar, then drag over anything the '
+              'speakers cannot be placed on.',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+                height: 1.45,
+                letterSpacing: -0.05,
+              ),
+            ),
+          )
+        else
+          ...zones.map(
+            (zone) => MouseRegion(
+              onEnter: (_) =>
+                  ref.read(hoveredBlockerIdProvider.notifier).state = zone.id,
+              onExit: (_) =>
+                  ref.read(hoveredBlockerIdProvider.notifier).state = null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${zone.width.toStringAsFixed(2)} × '
+                        '${zone.height.toStringAsFixed(2)} m',
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 13,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 15),
+                      color: AppTheme.textTertiary,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 22,
+                        minHeight: 22,
+                      ),
+                      splashRadius: 14,
+                      tooltip: 'Remove',
+                      onPressed: () => notifier.removeBlockedZone(zone.id),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActions() {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton(
-        onPressed: () => ref.read(roomProvider.notifier).resetToDefaults(),
-        child: const Text('Reset to defaults'),
-      ),
+      ],
     );
   }
 }
