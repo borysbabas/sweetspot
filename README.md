@@ -1,87 +1,71 @@
 # Sweetspot
 
-Sweetspot is an audiophile-focused speaker placement and room optimization tool built with Flutter.
+![Sweetspot](docs/thumbnail.png)
 
-## Features
+A speaker placement and room optimisation tool for people who care about how their stereo sounds. Enter the room's
+size, drag the speakers and the listening position around a floor plan, and Sweetspot scores the setup: how close it
+is to an equilateral triangle, the distances to each wall and to the listener, and where the first reflections land.
+It then says what to move, and by how much, to get the score up. A Flutter desktop app for Linux, Windows and macOS.
 
-- Acoustic-focused tooling for speaker placement decisions
-- Room design and optimization workflows
-- Cross-platform desktop targets: Linux, Windows, and macOS
+## Stack
 
-## Tech Stack
+| | |
+|---|---|
+| Framework | Flutter (stable), Dart `>=3.3.0 <4.0.0` |
+| State | Riverpod (`flutter_riverpod`) |
+| Maths | `vector_math` |
+| Targets | Linux, Windows and macOS desktop |
+| CI | GitHub Actions: analyse on `development`, build on PRs, release on demand |
 
-- Flutter
-- Dart (SDK `>=3.3.0 <4.0.0`)
-- Riverpod (`flutter_riverpod`)
-
-## Prerequisites
-
-- Flutter SDK (stable channel)
-- A configured desktop toolchain for your OS:
-    - Linux: GTK 3, CMake, Ninja, Clang
-    - macOS: Xcode command line tools
-    - Windows: Visual Studio with Desktop development with C++
-
-## Getting Started
+## Getting started
 
 ```bash
 flutter pub get
-flutter run
-```
-
-## Run on Desktop
-
-Enable and run a specific desktop target:
-
-```bash
-flutter config --enable-linux-desktop
-flutter run -d linux
-```
-
-```bash
-flutter config --enable-windows-desktop
-flutter run -d windows
-```
-
-```bash
-flutter config --enable-macos-desktop
-flutter run -d macos
-```
-
-## Tests
-
-```bash
+flutter run -d linux     # or -d windows / -d macos
 flutter test
 ```
 
-## Build Release Binaries
+Each desktop target needs its own toolchain: GTK 3, CMake, Ninja and Clang on Linux; the Xcode command line tools on
+macOS; Visual Studio with *Desktop development with C++* on Windows. If a target isn't enabled yet, run
+`flutter config --enable-<os>-desktop` once.
+
+Ready-made builds for all three are on the [Releases](https://github.com/borysbabas/sweetspot/releases) page.
+
+## How it scores a room
+
+| Part | What it does |
+|---|---|
+| Sweet spot | Finds the listening position that forms an equilateral triangle with the two speakers |
+| Aiming | Works out the toe-in so each speaker points at the listener |
+| Reflections | First-order reflection points on each wall, with the image-source method: mirror the speaker through the wall and draw a line to the listener |
+| Room context | Lowers the score when the speakers sit too close to the side or front wall, the listener too close to the back wall, or either too close to a blocked area |
+| Optimiser | Moves the speakers and listener in 10 cm steps while the score improves, and turns the difference into plain instructions ("move the right speaker 40 cm toward the right wall") |
+
+Blocked areas (a sofa, a cabinet, a door) are drawn on the floor plan in Blockers mode; the optimiser keeps everything
+out of them.
+
+## Releases
 
 ```bash
-flutter build linux --release
-flutter build windows --release
-flutter build macos --release
+flutter build linux --release     # build/linux/x64/release/bundle
+flutter build windows --release   # build/windows/x64/runner/Release
+flutter build macos --release     # build/macos/Build/Products/Release
 ```
 
-Default Flutter output directories:
+- A push to `development` runs `ci-development.yml`: dependencies and `flutter analyze`.
+- A pull request from `development` to `main` runs `build-desktop.yml`, a build check only.
+- `release-desktop.yml` is started by hand (**Run workflow** on *Release Desktop (Linux, Windows, macOS)*) with a
+  `release_version` such as `1.2.3`, and publishes `sweetspot-linux.tar.gz`, `sweetspot-windows.zip` and
+  `sweetspot-macos.zip` to a GitHub Release.
 
-- Linux: `build/linux/x64/release/bundle`
-- Windows: `build/windows/x64/runner/Release`
-- macOS: `build/macos/Build/Products/Release`
+## Project structure
 
-## GitHub Actions Desktop Release
-
-Desktop workflow behavior:
-
-- Push to `development` runs `.github/workflows/ci-development.yml` (dependency install + `flutter analyze`)
-- Pull request from `development` to `main` runs `.github/workflows/build-desktop.yml` (build validation only)
-- Publishing a GitHub Release uses `.github/workflows/release-desktop.yml`
-- Release is manual via **Run workflow** on `Release Desktop (Linux, Windows, macOS)`
-- `release_version` is required before release (for example `1.2.3` or `v1.2.3`)
-- Archives are published as:
-    - `sweetspot-linux.tar.gz`
-    - `sweetspot-windows.zip`
-    - `sweetspot-macos.zip`
-
-## Version
-
-Current app version in `pubspec.yaml`: `1.0.0+1`
+| Path | |
+|---|---|
+| `lib/main.dart`, `lib/app.dart` | Entry point and app shell |
+| `lib/features/room_design/` | The room screen: floor-plan canvas and painter, setup panel, room state provider and models |
+| `lib/features/acoustic/` | Sweet spot, aiming, reflections, room context and the optimiser, with their result models |
+| `lib/features/splash/` | Splash screen |
+| `lib/core/` | Theme and shared widgets |
+| `test/` | Tests for the acoustic services and the room design |
+| `linux/`, `macos/`, `windows/` | Desktop runners |
